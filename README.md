@@ -319,4 +319,107 @@ curl "http://localhost:8080/api/concerts/queue/status?tokenUuid={token-uuid}"
 ```bash
 curl http://localhost:8080/api/concerts/schedules \
   -H "Queue-Token: {token-uuid}"
+
+## 📊 DB 성능 분석 및 최적화 (과제 4 선택/심화)
+
+### 성능 분석 개요
+
+본 프로젝트의 데이터베이스 성능을 분석하고, 조회 성능이 저하될 수 있는 지점을 식별하여 최적화 방안을 제시합니다.
+
+### 주요 성능 병목 지점
+
+#### 🟥 HIGH RISK: 인기 상품 조회 (ProductSalesStatistics)
+- **문제**: 매번 3일치 데이터를 실시간 집계하며 풀 스캔 발생
+- **예상 성능**: 상품 1만개, 주문 10만건 기준 2-5초 응답 시간
+- **솔루션**: 배치 집계 테이블 분리 + 복합 인덱스
+
+#### 🟥 HIGH RISK: 예약 가능한 좌석 조회 (Seat)
+- **문제**: 복잡한 WHERE 조건과 만료 시간 체크로 인덱스 효율성 저하
+- **솔루션**: 좌석 예약 현황 캐시 테이블 + 최적화된 인덱스
+
+#### 🟨 MEDIUM RISK: 주문 내역 조회, 대기열 상태 조회
+- **문제**: user_id 인덱스 부재 시 풀 스캐, COUNT(*) 연산 비용
+- **솔루션**: 사용자별 복합 인덱스 + 상태별 파티셔닝
+
+### 최적화 솔루션
+
+#### 1. 인덱스 최적화
+```sql
+-- e-커머스: 복합 인덱스로 인기 상품 조회 최적화
+CREATE INDEX idx_product_sales_created_count
+ON product_sales_statistics(created_at, sales_count DESC);
+
+-- 콘서트: 좌석 예약 가능 여부 확인 최적화
+CREATE INDEX idx_seats_schedule_status_expires
+ON seats(schedule_id, seat_status, expires_at);
+
+-- 대기열: 토큰 상태별 조회 최적화
+CREATE INDEX idx_queue_tokens_status_position
+ON queue_tokens(token_status, queue_position);
+```
+
+#### 2. 테이블 구조 최적화
+```sql
+-- 인기 상품 집계 테이블 분리 (실시간 → 배치)
+CREATE TABLE popular_products_daily (
+    date DATE PRIMARY KEY,
+    product_id BIGINT,
+    product_name VARCHAR(255),
+    daily_sales_count INT,
+    ranking INT,
+    INDEX idx_date_ranking(date, ranking)
+);
+
+-- 좌석 예약 현황 캐시 테이블
+CREATE TABLE seat_availability_cache (
+    schedule_id BIGINT PRIMARY KEY,
+    available_count INT,
+    total_count INT,
+    last_updated TIMESTAMP
+);
+```
+
+#### 3. 파티셔닝 전략
+- **주문 테이블**: 월별 파티셔닝으로 대용량 데이터 처리
+- **대기열 토큰**: 상태별 파티셔닝 (WAITING, ACTIVE, COMPLETED)
+
+### 예상 성능 개선 효과
+
+| 기능 | 현재 예상 성능 | 최적화 후 성능 | 개선율 |
+|------|---------------|----------------|--------|
+| 인기 상품 조회 | 2-5초 | 50-100ms | **95% 개선** |
+| 주문 내역 조회 | 500ms-1s | 50-150ms | **80% 개선** |
+| 좌석 예약 가능 확인 | 300-800ms | 30-80ms | **85% 개선** |
+| 대기열 상태 조회 | 200-500ms | 20-50ms | **90% 개선** |
+
+### 구현 우선순위
+
+#### Phase 1 (즉시 적용)
+1. **기본 인덱스 생성** - 사용자별, 상태별 조회 최적화
+2. **읽기 복제본 분리** - 조회 부하 분산
+3. **쿼리 튜닝** - N+1 문제 해결
+
+#### Phase 2 (단기 적용)
+1. **복합 인덱스 최적화** - 복잡한 조회 조건 최적화
+2. **커버링 인덱스** - 랜덤 액세스 제거
+3. **배치 집계 테이블** - 인기 상품 실시간 집계 대체
+
+#### Phase 3 (중장기 적용)
+1. **테이블 파티셔닝** - 대용량 데이터 처리
+2. **캐시 레이어 도입** - Redis 기반 조회 성능 향상
+3. **샤딩 전략** - 수평적 확장 대비
+
+### 동시성 테스트 구현
+
+주요 기능별 동시성 이슈를 미리 식별하고 테스트로 규칙 설정:
+
+#### 테스트 시나리오
+1. **재고 차감 경쟁 조건**: 15명이 10개 재고에 동시 주문 → 정확히 10명만 성공
+2. **사용자 잔액 차감**: 동일 사용자 동시 주문 시 잔액 초과 방지
+3. **선착순 쿠폰 발급**: 20명이 3개 쿠폰에 동시 요청 → 정확히 3명만 성공
+4. **Idempotency Key 중복**: 동일 키로 10번 요청 → 1번만 처리, 9번은 중복 처리
+5. **콘서트 좌석 예약**: 20명이 1개 좌석 예약 → 1명만 성공
+6. **대기열 토큰 발급**: 100명 동시 발급 → 고유한 대기 순서 보장
+
+자세한 성능 분석 내용은 [`docs/DB_PERFORMANCE_ANALYSIS.md`](docs/DB_PERFORMANCE_ANALYSIS.md)를 참고하세요.
 ```
