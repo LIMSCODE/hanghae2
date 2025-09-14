@@ -29,12 +29,6 @@ public enum ErrorCode {
     COUPON_SOLD_OUT(HttpStatus.CONFLICT, "COUPON_SOLD_OUT", "쿠폰이 모두 소진되었습니다"),
     COUPON_ALREADY_ISSUED(HttpStatus.CONFLICT, "COUPON_ALREADY_ISSUED", "이미 발급받은 쿠폰입니다"),
 
-    // Queue Errors
-    QUEUE_NOT_FOUND(HttpStatus.NOT_FOUND, "QUEUE_NOT_FOUND", "대기열 정보를 찾을 수 없습니다"),
-    INVALID_QUEUE_TOKEN(HttpStatus.UNAUTHORIZED, "INVALID_QUEUE_TOKEN", "유효하지 않은 대기열 토큰입니다"),
-    QUEUE_EXPIRED(HttpStatus.FORBIDDEN, "QUEUE_EXPIRED", "대기열 토큰이 만료되었습니다"),
-    INVALID_QUEUE_STATUS(HttpStatus.BAD_REQUEST, "INVALID_QUEUE_STATUS", "잘못된 대기열 상태입니다"),
-
     // Concurrency Errors
     OPTIMISTIC_LOCK_EXCEPTION(HttpStatus.CONFLICT, "OPTIMISTIC_LOCK_EXCEPTION", "동시성 충돌이 발생했습니다. 다시 시도해주세요");
 

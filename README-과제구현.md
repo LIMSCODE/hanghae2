@@ -2,7 +2,7 @@
 
 ## 🎯 과제 개요
 - **필수 과제**: 클린 아키텍처와 레이어드 아키텍처를 혼합하여 E-Commerce 시스템 구현
-- **심화 과제**: 선착순 쿠폰 기능과 대기열 시스템 구현
+- **심화 과제**: 선착순 쿠폰 기능 구현
 - **테스트**: Mock을 활용한 순수 비즈니스 로직 단위 테스트 작성
 
 ## 🔄 과제 2에서 과제 3으로의 변화
@@ -30,7 +30,6 @@ OrderController → OrderUseCase
 BalanceController → UserService (기존 그대로 유지)
 ProductController → ProductService (기존 그대로 유지)
 CouponController → CouponService (신규 추가)
-QueueController → QueueService (신규 추가)
 ```
 
 ### 🎯 **핵심 차이점**
@@ -70,11 +69,9 @@ OrderUseCase → UserPort, ProductPort, OrderPort (추상화)
 - ✅ **OrderService**: 여전히 존재 (OrderUseCase에서 부분 활용)
 - ✅ **StatisticsService**: 그대로 유지 (ProductController에서 활용)
 - ➕ **CouponService**: 신규 추가 (심화 과제)
-- ➕ **QueueService**: 신규 추가 (심화 과제)
 
-### ➕ **완전히 새로운 심화 기능들**
+### ➕ **완전히 새로운 심화 기능**
 1. **🎟️ 선착순 쿠폰 시스템** - 과제 2에 없던 완전 신규 기능
-2. **⏰ 대기열 시스템** - 과제 2에 없던 완전 신규 기능
 
 ### 🧪 **테스트 접근법의 진화**
 ```java
@@ -96,7 +93,7 @@ OrderUseCase → UserPort, ProductPort, OrderPort (추상화)
 - 🔄 **기존 로직 재활용**: 기본 비즈니스 로직은 동일
 - 🏗️ **아키텍처 개선**: 주문/결제만 클린 아키텍처 적용
 - 🔌 **의존성 역전**: Port & Adapter 패턴으로 완전 분리
-- ➕ **기능 확장**: 쿠폰, 대기열 시스템 추가
+- ➕ **기능 확장**: 쿠폰 시스템 추가
 - 📈 **테스트 개선**: 완전 격리된 단위 테스트 가능
 
 ## 📁 프로젝트 구조
@@ -114,7 +111,6 @@ OrderUseCase → UserPort, ProductPort, OrderPort (추상화)
     ├── Balance (포인트 충전)
     ├── Product (상품 조회)
     ├── Coupon (선착순 쿠폰)
-    └── Queue (대기열 시스템)
 ```
 
 ## ✅ 구현 완료 기능
@@ -191,41 +187,6 @@ CouponRepository (비관적 락 활용)
 - ✅ 쿠폰 소진 상황 처리
 - ✅ 외부 의존성 완전 분리 테스트
 
-### 2. ⏰ 대기열 시스템 (Concert)
-
-#### 🏗️ 시스템 구조
-```
-QueueController
-      ↓
-QueueService (대기열 관리)
-      ↓
-QueueRepository + Scheduler
-```
-
-#### 🔄 대기열 메커니즘
-- **토큰 기반**: UUID 토큰으로 사용자 식별
-- **상태 관리**: WAITING → ACTIVE → EXPIRED
-- **스케줄러**: 30초마다 대기자 자동 활성화
-- **동시 접속 제한**: 최대 100명 동시 활성
-
-#### 📊 주요 기능
-- ✅ 대기열 진입 (`POST /api/v1/queue/enter`)
-- ✅ 대기 상태 조회 (`GET /api/v1/queue/status`)
-- ✅ 토큰 검증 (API 접근 제어)
-- ✅ 대기열 통계 (`GET /api/v1/queue/statistics`)
-- ✅ 자동 대기자 활성화 (스케줄러)
-
-#### ⚡ 성능 최적화
-- **포지션 계산**: 실시간 대기 순번 업데이트
-- **만료 처리**: 10분 후 자동 토큰 만료
-- **배치 처리**: 스케줄러로 효율적인 상태 전환
-
-#### 🧪 단위 테스트
-- ✅ 대기열 진입 다양한 시나리오 (Mock 활용)
-- ✅ 토큰 검증 성공/실패 케이스
-- ✅ 대기자 활성화 프로세스 검증
-- ✅ 외부 의존성 완전 분리 테스트
-
 ## 🧪 테스트 전략
 
 ### Mock 활용 원칙
@@ -247,11 +208,6 @@ QueueRepository + Scheduler
 @Mock UserService userService;
 ```
 
-#### QueueService 테스트
-```java
-@Mock QueueRepository queueRepository;
-@Mock UserService userService;
-```
 
 ### 테스트 커버리지
 - **비즈니스 로직 중심**: 순수한 도메인 로직만 검증
@@ -285,9 +241,6 @@ User getUserWithLock(Long userId);  // 비관적 락
 Product getProductWithLock(Long productId);  // 비관적 락
 ```
 
-### 대기열 관리
-- **원자적 상태 변경**: 토큰 상태를 원자적으로 관리
-- **배치 처리**: 스케줄러를 통한 효율적 상태 전환
 
 ## 📈 성능 고려사항
 
@@ -306,7 +259,6 @@ Product getProductWithLock(Long productId);  // 비관적 락
 ```java
 public enum ErrorCode {
     COUPON_SOLD_OUT(HttpStatus.CONFLICT, "쿠폰이 모두 소진되었습니다"),
-    QUEUE_EXPIRED(HttpStatus.FORBIDDEN, "대기열 토큰이 만료되었습니다"),
     INSUFFICIENT_BALANCE(HttpStatus.CONFLICT, "잔액이 부족합니다")
 }
 ```
@@ -326,8 +278,7 @@ public enum ErrorCode {
 
 ### ✅ 심화 과제
 - [x] 선착순 쿠폰 관련 기능 구현
-- [x] 대기열 관련 기능 구현
-- [x] 동시성 제어 (비관적 락, 스케줄러)
+- [x] 동시성 제어 (비관적 락)
 - [x] 심화 기능들의 단위 테스트 작성
 
 ## 🚀 실행 방법
@@ -359,12 +310,6 @@ docker-compose up -d
 - `POST /api/v1/coupons/{couponId}/issue` - 선착순 쿠폰 발급
 - `GET /api/v1/coupons/users/{userId}` - 사용자 보유 쿠폰
 
-### ⏰ 대기열 관련
-- `POST /api/v1/queue/enter` - 대기열 진입
-- `GET /api/v1/queue/status` - 대기 상태 조회
-- `DELETE /api/v1/queue/exit` - 대기열 나가기
-- `GET /api/v1/queue/statistics` - 대기열 통계
-
 ---
 
 ## 📝 결론
@@ -376,4 +321,4 @@ docker-compose up -d
 - **Mock을 활용한 완전한 격리 테스트**로 순수 비즈니스 로직 검증
 - **동시성 제어**를 통한 실전 대응 가능한 시스템 구현
 
-심화 과제인 **선착순 쿠폰 시스템**과 **대기열 시스템**까지 완료하여, 대용량 트래픽 상황에서도 안정적으로 동작할 수 있는 견고한 시스템을 구축했습니다. 🎉
+심화 과제인 **선착순 쿠폰 시스템**까지 완료하여, 대용량 트래픽 상황에서도 안정적으로 동작할 수 있는 견고한 시스템을 구축했습니다. 🎉
