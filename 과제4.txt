@@ -97,6 +97,8 @@
     - 외부 메시지 전송 실패 시 fallback 처리 검증 (e.g. Outbox 저장 여부 확인)
     - **결제 API는 idempotency_key 사용** → 중복 요청 테스트 포함
     - 쿠폰 발급 경쟁 조건 테스트: 동시에 요청 시 한 명만 성공
+
+
 - **콘서트 예약 서비스**
     
     **1. Infrastructure Layer 구현**
@@ -113,6 +115,8 @@
 
 > `Infrastructure` 는 RDMBS ( MySQL ) 기반으로 작성합니다.
 > 
+
+
 
 ### **`(선택)심화 과제 - DB`**
 
