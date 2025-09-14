@@ -25,6 +25,9 @@ public class Order {
     @Column(name = "total_amount", nullable = false, precision = 15, scale = 2)
     private BigDecimal totalAmount;
 
+    @Column(name = "idempotency_key", unique = true, length = 255)
+    private String idempotencyKey;
+
     @Column(name = "ordered_at", nullable = false)
     private LocalDateTime orderedAt;
 
@@ -43,6 +46,16 @@ public class Order {
     public Order(Long userId, BigDecimal totalAmount) {
         this.userId = userId;
         this.totalAmount = totalAmount;
+        this.orderStatus = OrderStatus.PENDING;
+        this.orderedAt = LocalDateTime.now();
+        this.createdAt = LocalDateTime.now();
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public Order(Long userId, BigDecimal totalAmount, String idempotencyKey) {
+        this.userId = userId;
+        this.totalAmount = totalAmount;
+        this.idempotencyKey = idempotencyKey;
         this.orderStatus = OrderStatus.PENDING;
         this.orderedAt = LocalDateTime.now();
         this.createdAt = LocalDateTime.now();
@@ -109,6 +122,10 @@ public class Order {
 
     public List<OrderItem> getOrderItems() {
         return orderItems;
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
     }
 
     public enum OrderStatus {

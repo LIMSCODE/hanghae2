@@ -2,7 +2,7 @@
 
 한국항해99 부트캠프 과제로 구현된 **Clean Architecture 기반 Spring Boot 서버**입니다.
 
-- **e-커머스 상품 주문 서비스**
+- **e-커머스 상품 주문 서비스** (Infrastructure Layer 구현 완료)
 - **콘서트 예약 서비스** (대기열 시스템 포함)
 
 ## 🏗️ 아키텍처
@@ -30,6 +30,108 @@
 - **ORM**: Spring Data JPA + Hibernate
 - **Build**: Gradle 8.11.1 (Kotlin DSL)
 - **Test**: JUnit 5 + AssertJ + Testcontainers
+
+## 🛒 e-커머스 상품 주문 서비스 (과제 4 Infrastructure Layer)
+
+### 핵심 기능
+
+#### 1. Infrastructure Layer 구현
+- **Repository Pattern**: Clean Architecture 원칙에 따른 Domain Interface → Infrastructure Implementation
+- **JPA 기반 구현**: Spring Data JPA + 커스텀 쿼리를 통한 고성능 데이터 처리
+- **트랜잭션 관리**: 복잡한 비즈니스 로직에서 데이터 일관성 보장
+
+#### 2. 외부 메시지 전송 (Outbox Pattern)
+- **Outbox 테이블**: 이벤트 발행 실패에 대비한 안정적인 메시지 처리
+- **MockMessageProducer**: 외부 데이터 플랫폼 연동 시뮬레이션 (90% 성공률)
+- **자동 재시도**: 실패한 이벤트에 대한 최대 3회 재시도 메커니즘
+- **스케줄링**: 10초마다 대기 중인 이벤트 처리 및 실패 이벤트 재시도
+
+#### 3. Idempotency 보장
+- **중복 요청 방지**: UUID 기반 idempotency_key를 통한 결제 중복 처리 방지
+- **원자성 보장**: 재고 차감, 잔액 차감, 주문 생성이 하나의 트랜잭션으로 처리
+
+#### 4. 동시성 처리
+- **선착순 쿠폰 발급**: 비관적 락(Pessimistic Lock)을 통한 동시 요청 제어
+- **재고 관리**: 낙관적 업데이트로 재고 부족 시 즉시 실패 처리
+
+### Repository 구조
+
+#### Domain Layer (Interfaces)
+```
+kr.hhplus.be.server.domain.ecommerce.repository/
+├── UserBalanceRepository.java    # 사용자 잔액 관리
+├── ProductRepository.java        # 상품 및 재고 관리
+├── OrderRepository.java          # 주문 관리
+├── CouponRepository.java         # 쿠폰 발급 및 관리
+└── OutboxRepository.java         # 외부 메시지 이벤트 관리
+```
+
+#### Infrastructure Layer (Implementations)
+```
+kr.hhplus.be.server.infrastructure.ecommerce/
+├── JpaUserBalanceRepository.java  # 잔액 충전/차감 + 비관적 락
+├── JpaProductRepository.java      # 재고 관리 + 판매 통계 업데이트
+├── JpaOrderRepository.java        # 주문 생성 + idempotency 처리
+├── JpaCouponRepository.java       # 선착순 쿠폰 발급 제어
+└── JpaOutboxRepository.java       # 이벤트 발행 및 재시도 처리
+```
+
+### 통합 테스트
+
+#### 주요 테스트 시나리오
+- **전체 주문 플로우**: 충전 → 재고 확인 → 주문 → 잔액 차감 → 외부 전송
+- **Idempotency 테스트**: 동일한 key로 중복 요청 시 한 번만 처리
+- **동시성 테스트**: 쿠폰 발급 경쟁 조건에서 한 명만 성공
+- **실패 시나리오**: 재고 부족, 잔액 부족 상황에서 롤백 처리
+
+### API 명세
+
+#### 주문 및 결제 (idempotency 지원)
+```http
+POST /api/orders
+Content-Type: application/json
+Idempotency-Key: {uuid}
+
+{
+  "userId": 1,
+  "orderItems": [
+    {
+      "productId": 1,
+      "quantity": 2
+    }
+  ]
+}
+```
+
+#### 잔액 충전
+```http
+POST /api/balance/charge
+Content-Type: application/json
+
+{
+  "userId": 1,
+  "amount": 50000
+}
+```
+
+#### 선착순 쿠폰 발급
+```http
+POST /api/coupons/{couponId}/issue
+Content-Type: application/json
+
+{
+  "userId": 1
+}
+```
+
+### 외부 연동 (Outbox Pattern)
+
+#### 이벤트 발행 흐름
+1. **주문 완료 시**: OrderCompletedEvent를 Outbox 테이블에 저장
+2. **스케줄링**: 10초마다 대기 중인 이벤트 처리
+3. **외부 전송**: MockMessageProducer로 데이터 플랫폼에 전송 시뮬레이션
+4. **재시도**: 실패 시 최대 3회까지 자동 재시도
+5. **정리**: 7일 이상 지난 처리 완료 이벤트 자동 삭제
 
 ## 🎵 콘서트 예약 서비스 (과제 2,3,4 구현)
 
