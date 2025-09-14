@@ -21,6 +21,20 @@ public enum ErrorCode {
     ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "ORDER_NOT_FOUND", "주문을 찾을 수 없습니다"),
     ORDER_CREATION_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "ORDER_CREATION_FAILED", "주문 생성에 실패했습니다"),
 
+    // Coupon Errors
+    COUPON_NOT_FOUND(HttpStatus.NOT_FOUND, "COUPON_NOT_FOUND", "쿠폰을 찾을 수 없습니다"),
+    COUPON_NOT_ACTIVE(HttpStatus.BAD_REQUEST, "COUPON_NOT_ACTIVE", "비활성화된 쿠폰입니다"),
+    COUPON_NOT_STARTED(HttpStatus.BAD_REQUEST, "COUPON_NOT_STARTED", "쿠폰 발급 기간이 아닙니다"),
+    COUPON_EXPIRED(HttpStatus.BAD_REQUEST, "COUPON_EXPIRED", "쿠폰 발급 기간이 만료되었습니다"),
+    COUPON_SOLD_OUT(HttpStatus.CONFLICT, "COUPON_SOLD_OUT", "쿠폰이 모두 소진되었습니다"),
+    COUPON_ALREADY_ISSUED(HttpStatus.CONFLICT, "COUPON_ALREADY_ISSUED", "이미 발급받은 쿠폰입니다"),
+
+    // Queue Errors
+    QUEUE_NOT_FOUND(HttpStatus.NOT_FOUND, "QUEUE_NOT_FOUND", "대기열 정보를 찾을 수 없습니다"),
+    INVALID_QUEUE_TOKEN(HttpStatus.UNAUTHORIZED, "INVALID_QUEUE_TOKEN", "유효하지 않은 대기열 토큰입니다"),
+    QUEUE_EXPIRED(HttpStatus.FORBIDDEN, "QUEUE_EXPIRED", "대기열 토큰이 만료되었습니다"),
+    INVALID_QUEUE_STATUS(HttpStatus.BAD_REQUEST, "INVALID_QUEUE_STATUS", "잘못된 대기열 상태입니다"),
+
     // Concurrency Errors
     OPTIMISTIC_LOCK_EXCEPTION(HttpStatus.CONFLICT, "OPTIMISTIC_LOCK_EXCEPTION", "동시성 충돌이 발생했습니다. 다시 시도해주세요");
 

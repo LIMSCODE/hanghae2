@@ -3,7 +3,7 @@ package kr.hhplus.be.server.controller;
 import kr.hhplus.be.server.dto.ApiResponse;
 import kr.hhplus.be.server.dto.OrderRequest;
 import kr.hhplus.be.server.dto.OrderResponse;
-import kr.hhplus.be.server.service.OrderService;
+import kr.hhplus.be.server.order.application.OrderUseCase;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
@@ -16,17 +16,17 @@ import jakarta.validation.Valid;
 @Validated
 public class OrderController {
 
-    private final OrderService orderService;
+    private final OrderUseCase orderUseCase;
 
-    public OrderController(OrderService orderService) {
-        this.orderService = orderService;
+    public OrderController(OrderUseCase orderUseCase) {
+        this.orderUseCase = orderUseCase;
     }
 
     @PostMapping("/orders")
     public ResponseEntity<ApiResponse<OrderResponse>> createOrder(
             @Valid @RequestBody OrderRequest request) {
         
-        OrderResponse response = orderService.createOrder(request);
+        OrderResponse response = orderUseCase.createOrder(request);
         
         return ResponseEntity.ok(
             ApiResponse.success("주문이 완료되었습니다", response)
@@ -36,7 +36,7 @@ public class OrderController {
     @GetMapping("/orders/{orderId}")
     public ResponseEntity<ApiResponse<OrderResponse>> getOrder(@PathVariable Long orderId) {
         
-        OrderResponse response = orderService.getOrder(orderId);
+        OrderResponse response = orderUseCase.getOrder(orderId);
         
         return ResponseEntity.ok(
             ApiResponse.success("주문 조회가 완료되었습니다", response)
@@ -49,7 +49,7 @@ public class OrderController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
         
-        Page<OrderResponse> response = orderService.getUserOrders(userId, page, size);
+        Page<OrderResponse> response = orderUseCase.getUserOrders(userId, page, size);
         
         return ResponseEntity.ok(
             ApiResponse.success("주문 목록 조회가 완료되었습니다", response)
