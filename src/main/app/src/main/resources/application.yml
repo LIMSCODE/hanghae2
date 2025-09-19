@@ -25,7 +25,20 @@ spring:
         format_sql: true
         use_sql_comments: true
     open-in-view: false
-    
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-wait: -1ms
+          max-idle: 8
+          min-idle: 0
+
   sql:
     init:
       mode: always

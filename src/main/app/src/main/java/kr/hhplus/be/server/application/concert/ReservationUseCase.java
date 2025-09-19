@@ -3,11 +3,14 @@ package kr.hhplus.be.server.application.concert;
 import kr.hhplus.be.server.domain.concert.Reservation;
 import kr.hhplus.be.server.domain.concert.Seat;
 import kr.hhplus.be.server.domain.queue.QueueToken;
+import kr.hhplus.be.server.infrastructure.redis.RedisDistributedLock;
+import kr.hhplus.be.server.infrastructure.redis.SeatCacheService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.List;
 
 @Service
@@ -18,109 +21,137 @@ public class ReservationUseCase {
     private final QueueTokenRepository queueTokenRepository;
     private final UserBalanceService userBalanceService;
     private final PaymentService paymentService;
+    private final RedisDistributedLock distributedLock;
+    private final SeatCacheService seatCacheService;
 
     public ReservationUseCase(SeatRepository seatRepository,
                             ReservationRepository reservationRepository,
                             QueueTokenRepository queueTokenRepository,
                             UserBalanceService userBalanceService,
-                            PaymentService paymentService) {
+                            PaymentService paymentService,
+                            RedisDistributedLock distributedLock,
+                            SeatCacheService seatCacheService) {
         this.seatRepository = seatRepository;
         this.reservationRepository = reservationRepository;
         this.queueTokenRepository = queueTokenRepository;
         this.userBalanceService = userBalanceService;
         this.paymentService = paymentService;
+        this.distributedLock = distributedLock;
+        this.seatCacheService = seatCacheService;
     }
 
     @Transactional
     public ReservationResult reserveSeat(ReserveSeatCommand command) {
-        // 1. 토큰 검증
-        QueueToken token = queueTokenRepository.findByTokenUuid(command.getTokenUuid())
-                .orElseThrow(() -> new IllegalArgumentException("Invalid token"));
+        String lockKey = "seat:reserve:" + command.getSeatId();
 
-        if (!token.isActive()) {
-            throw new IllegalStateException("Token is not active");
-        }
+        return distributedLock.executeWithLock(lockKey, 3, 10, () -> {
+            // 1. 토큰 검증
+            QueueToken token = queueTokenRepository.findByTokenUuid(command.getTokenUuid())
+                    .orElseThrow(() -> new IllegalArgumentException("Invalid token"));
 
-        // 2. 좌석 조회 및 예약 가능성 확인
-        Seat seat = seatRepository.findById(command.getSeatId())
-                .orElseThrow(() -> new IllegalArgumentException("Seat not found"));
+            if (!token.isActive()) {
+                throw new IllegalStateException("Token is not active");
+            }
 
-        if (!seat.isAvailable()) {
-            throw new IllegalStateException("Seat is not available");
-        }
+            // 2. 캐시에서 임시 예약 상태 확인
+            SeatCacheService.TemporaryReservation tempReservation =
+                seatCacheService.getTemporaryReservation(command.getSeatId());
 
-        // 3. 좌석 임시 예약 (5분)
-        seat.reserve(command.getUserId(), 5);
-        seatRepository.save(seat);
+            if (tempReservation != null && !tempReservation.getUserId().equals(command.getUserId())) {
+                throw new IllegalStateException("Seat is temporarily reserved by another user");
+            }
 
-        // 4. 예약 정보 저장
-        Reservation reservation = new Reservation(command.getUserId(), seat, command.getPrice());
-        reservationRepository.save(reservation);
+            // 3. 좌석 조회 및 예약 가능성 확인
+            Seat seat = seatRepository.findById(command.getSeatId())
+                    .orElseThrow(() -> new IllegalArgumentException("Seat not found"));
 
-        // 5. 좌석 예약 현황 업데이트
-        seat.getSchedule().decreaseAvailableSeats();
+            if (!seat.isAvailable()) {
+                throw new IllegalStateException("Seat is not available");
+            }
 
-        return new ReservationResult(
-                reservation.getReservationId(),
-                seat.getSeatNumber(),
-                reservation.getPrice(),
-                reservation.getExpiresAt()
-        );
+            // 4. 좌석 임시 예약 (5분)
+            seat.reserve(command.getUserId(), 5);
+            seatRepository.save(seat);
+
+            // 5. 좌석 배치도 캐시 무효화 (예약 상태 변경으로 인한 캐시 갱신)
+            seatCacheService.invalidateSeatLayout(seat.getSchedule().getScheduleId());
+
+            // 7. 예약 정보 저장
+            Reservation reservation = new Reservation(command.getUserId(), seat, command.getPrice());
+            reservationRepository.save(reservation);
+
+            // 8. 좌석 예약 현황 업데이트
+            seat.getSchedule().decreaseAvailableSeats();
+
+            return new ReservationResult(
+                    reservation.getReservationId(),
+                    seat.getSeatNumber(),
+                    reservation.getPrice(),
+                    reservation.getExpiresAt()
+            );
+        });
     }
 
     @Transactional
     public PaymentResult processPayment(ProcessPaymentCommand command) {
-        // 1. 토큰 검증
-        QueueToken token = queueTokenRepository.findByTokenUuid(command.getTokenUuid())
-                .orElseThrow(() -> new IllegalArgumentException("Invalid token"));
+        String lockKey = "payment:" + command.getReservationId();
 
-        if (!token.isActive()) {
-            throw new IllegalStateException("Token is not active");
-        }
+        return distributedLock.executeWithLock(lockKey, 3, 10, () -> {
+            // 1. 토큰 검증
+            QueueToken token = queueTokenRepository.findByTokenUuid(command.getTokenUuid())
+                    .orElseThrow(() -> new IllegalArgumentException("Invalid token"));
 
-        // 2. 예약 조회 및 검증
-        Reservation reservation = reservationRepository.findById(command.getReservationId())
-                .orElseThrow(() -> new IllegalArgumentException("Reservation not found"));
+            if (!token.isActive()) {
+                throw new IllegalStateException("Token is not active");
+            }
 
-        if (!reservation.getUserId().equals(command.getUserId())) {
-            throw new IllegalArgumentException("Reservation does not belong to user");
-        }
+            // 2. 예약 조회 및 검증
+            Reservation reservation = reservationRepository.findById(command.getReservationId())
+                    .orElseThrow(() -> new IllegalArgumentException("Reservation not found"));
 
-        if (!reservation.isTemporary()) {
-            throw new IllegalStateException("Reservation is not in temporary state");
-        }
+            if (!reservation.getUserId().equals(command.getUserId())) {
+                throw new IllegalArgumentException("Reservation does not belong to user");
+            }
 
-        if (reservation.isExpired()) {
-            throw new IllegalStateException("Reservation has expired");
-        }
+            if (!reservation.isTemporary()) {
+                throw new IllegalStateException("Reservation is not in temporary state");
+            }
 
-        // 3. 잔액 확인 및 차감
-        userBalanceService.deductBalance(command.getUserId(), reservation.getPrice());
+            if (reservation.isExpired()) {
+                throw new IllegalStateException("Reservation has expired");
+            }
 
-        // 4. 결제 처리
-        PaymentInfo paymentInfo = paymentService.processPayment(
-                command.getUserId(),
-                reservation.getPrice(),
-                "Concert Seat Reservation - " + reservation.getSeat().getSeatNumber()
-        );
+            // 3. 잔액 확인 및 차감
+            userBalanceService.deductBalance(command.getUserId(), reservation.getPrice());
 
-        // 5. 예약 확정
-        reservation.confirm();
-        reservation.getSeat().confirmReservation();
+            // 4. 결제 처리
+            PaymentInfo paymentInfo = paymentService.processPayment(
+                    command.getUserId(),
+                    reservation.getPrice(),
+                    "Concert Seat Reservation - " + reservation.getSeat().getSeatNumber()
+            );
 
-        // 6. 토큰 완료 처리
-        token.complete();
+            // 5. 예약 확정
+            reservation.confirm();
+            reservation.getSeat().confirmReservation();
 
-        reservationRepository.save(reservation);
-        seatRepository.save(reservation.getSeat());
-        queueTokenRepository.save(token);
+            // 6. 좌석 배치도 캐시 무효화 (결제 완료로 좌석 상태 변경)
+            seatCacheService.invalidateSeatLayout(reservation.getSeat().getSchedule().getScheduleId());
 
-        return new PaymentResult(
-                paymentInfo.getPaymentId(),
-                reservation.getReservationId(),
-                reservation.getPrice(),
-                LocalDateTime.now()
-        );
+            // 8. 토큰 완료 처리
+            token.complete();
+
+            reservationRepository.save(reservation);
+            seatRepository.save(reservation.getSeat());
+            queueTokenRepository.save(token);
+
+            return new PaymentResult(
+                    paymentInfo.getPaymentId(),
+                    reservation.getReservationId(),
+                    reservation.getPrice(),
+                    LocalDateTime.now()
+            );
+        });
     }
 
     @Transactional(readOnly = true)
@@ -131,6 +162,21 @@ public class ReservationUseCase {
     @Transactional(readOnly = true)
     public List<AvailableSeatInfo> getAvailableSeats(Long scheduleId) {
         return seatRepository.findAvailableSeatsByScheduleId(scheduleId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<SeatCacheService.SeatLayoutDto> getSeatLayout(Long scheduleId) {
+        // 캐시에서 먼저 조회 시도
+        List<SeatCacheService.SeatLayoutDto> cachedLayout = seatCacheService.getCachedSeatLayout(scheduleId);
+        if (cachedLayout != null) {
+            return cachedLayout;
+        }
+
+        // 캐시 미스인 경우 DB에서 조회 후 캐시 저장
+        List<SeatCacheService.SeatLayoutDto> seatLayout = seatRepository.findSeatLayoutByScheduleId(scheduleId);
+        seatCacheService.cacheSeatLayout(scheduleId, seatLayout);
+
+        return seatLayout;
     }
 
     // Command 클래스들

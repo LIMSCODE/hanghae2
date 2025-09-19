@@ -27,6 +27,7 @@
 ### 기술 스택
 - **Framework**: Spring Boot 3.4.1 + Java 17
 - **Database**: MySQL 8.0 + HikariCP Connection Pool
+- **Cache**: Redis 7.0 + Redisson (분산락 + 캐싱)
 - **ORM**: Spring Data JPA + Hibernate
 - **Build**: Gradle 8.11.1 (Kotlin DSL)
 - **Test**: JUnit 5 + AssertJ + Testcontainers
@@ -265,6 +266,19 @@ kr.hhplus.be.server.infrastructure/
 
 ### 동시성 처리
 
+#### Redis 분산락 적용
+```java
+@Transactional
+public ReservationResult reserveSeat(ReserveSeatCommand command) {
+    String lockKey = "seat:reserve:" + command.getSeatId();
+
+    return distributedLock.executeWithLock(lockKey, 3, 10, () -> {
+        // 좌석 예약 로직 - 분산 환경에서 안전하게 처리
+        // 동시에 여러 서버에서 같은 좌석 예약 시도해도 한 명만 성공
+    });
+}
+```
+
 #### 좌석 예약 경쟁 상황
 ```java
 // 동시에 10명이 같은 좌석 예약 시도
@@ -279,6 +293,54 @@ void concurrentSeatReservationTest() {
 - **스케줄링**: 30초마다 만료 토큰 정리 및 새 토큰 활성화
 - **순서 보장**: 대기 순서에 따른 토큰 활성화
 
+## 🚀 Redis 기반 성능 최적화
+
+### Redis 분산락 (동시성 제어)
+- **좌석 예약**: `seat:reserve:{seatId}` - 동시 예약 시도 방지
+- **결제 처리**: `payment:{reservationId}` - 중복 결제 방지
+- **Redisson**: 자동 락 해제, 재시도 로직 내장
+
+### Redis 캐싱 (성능 향상)
+
+#### 좌석 배치도 캐싱 (2시간 TTL)
+```java
+// Cache-Aside 패턴으로 좌석 배치 정보 캐싱
+public List<SeatLayoutDto> getSeatLayout(Long scheduleId) {
+    // 1. 캐시에서 조회 시도
+    List<SeatLayoutDto> cached = seatCacheService.getCachedSeatLayout(scheduleId);
+    if (cached != null) return cached;
+
+    // 2. 캐시 미스 시 DB 조회 후 캐시 저장
+    List<SeatLayoutDto> layout = seatRepository.findSeatLayoutByScheduleId(scheduleId);
+    seatCacheService.cacheSeatLayout(scheduleId, layout);
+    return layout;
+}
+```
+
+#### 인기 콘서트 목록 캐싱 (15분 TTL)
+- **복잡한 집계 쿼리**: 예약률, 인기도 계산 결과 캐싱
+- **실시간성**: 15분마다 갱신으로 적절한 실시간성 유지
+
+### 캐시 무효화 전략
+- **예약 완료시**: 해당 스케줄의 좌석 배치도 캐시 삭제
+- **새 콘서트 등록시**: 인기 콘서트 목록 캐시 삭제
+- **장애 복구**: Redis 장애시에도 DB로 자동 fallback
+
+### Redis 테스트
+```java
+@Test
+void Redis_분산락_동시성_테스트() {
+    // 10개 쓰레드가 동시에 같은 자원에 접근
+    // 분산락으로 순차 처리 보장
+}
+
+@Test
+void 좌석_배치도_캐시_테스트() {
+    // Cache Hit/Miss 시나리오 검증
+    // TTL 만료 후 자동 삭제 확인
+}
+```
+
 ## Getting Started
 
 ### Prerequisites
@@ -288,7 +350,12 @@ void concurrentSeatReservationTest() {
 `local` profile 로 실행하기 위하여 인프라가 설정되어 있는 Docker 컨테이너를 실행해주셔야 합니다.
 
 ```bash
+# MySQL + Redis 컨테이너 실행
 docker-compose up -d
+
+# 컨테이너 상태 확인
+docker-compose ps
+# mysql (3306), redis (6379) 포트가 올라와 있어야 함
 ```
 
 ### 애플리케이션 실행
